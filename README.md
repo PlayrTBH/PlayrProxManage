@@ -1,3 +1,5 @@
+FYI, THIS IS AI SLOP, DO NOT FIND THIS AND THEN USE THIS FOR YOUR OWN PROJECTS, THIS IS JUST A FUN THING FOR ME
+
 # Proxmox Manager
 
 A self-hosted management and reporting tool for Proxmox VE virtual machines
