@@ -1,0 +1,20 @@
+[
+  {
+    "id": "site-a",
+    "name": "Datacenter A",
+    "host": "10.0.0.10",
+    "port": 8006,
+    "token_id": "pmxmgr@pve!reporter",
+    "token_secret": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "verify_ssl": false
+  },
+  {
+    "id": "site-b",
+    "name": "Datacenter B",
+    "host": "pve.siteb.example.com",
+    "port": 8006,
+    "token_id": "pmxmgr@pve!reporter",
+    "token_secret": "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
+    "verify_ssl": true
+  }
+]

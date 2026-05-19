@@ -1,0 +1,30 @@
+[Unit]
+Description=Proxmox Manager — VM management and reporting
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxmox-manager
+Group=proxmox-manager
+WorkingDirectory=/opt/proxmox-manager
+EnvironmentFile=/etc/proxmox-manager/proxmox-manager.env
+ExecStart=/opt/proxmox-manager/venv/bin/uvicorn app.main:app \
+    --host ${BIND_HOST} --port ${BIND_PORT} --no-access-log
+Restart=on-failure
+RestartSec=5
+
+# --- hardening: the service only needs its own data dir ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/proxmox-manager
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

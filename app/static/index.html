@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Proxmox Manager</title>
+<style>
+  /* ---- industrial / control-room aesthetic ---- */
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg:        #0e1116;
+    --bg-panel:  #161b22;
+    --bg-elev:   #1c232d;
+    --border:    #2a323d;
+    --border-bright: #3a4654;
+    --text:      #d6dde6;
+    --text-dim:  #8b97a6;
+    --text-faint:#5b6675;
+    --accent:    #e8862e;       /* proxmox-ish amber */
+    --accent-dim:#7a4d1d;
+    --green:     #41c178;
+    --red:       #e0524a;
+    --blue:      #4b9fd6;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(232,134,46,0.06), transparent),
+      radial-gradient(700px 600px at 0% 110%, rgba(75,159,214,0.05), transparent);
+  }
+  #app { position: relative; z-index: 1; }
+
+  button {
+    font-family: var(--sans); font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border-bright); background: var(--bg-elev);
+    color: var(--text); padding: 7px 13px; border-radius: 5px;
+    transition: background .14s, border-color .14s, transform .05s;
+  }
+  button:hover:not(:disabled) { background: #242d39; border-color: var(--accent-dim); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent-dim); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: #93601f; }
+  button.danger { border-color: #5e2c29; }
+  button.danger:hover:not(:disabled) { background: #3a1f1d; border-color: var(--red); }
+  button.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+  button.ghost:hover:not(:disabled) { color: var(--text); background: var(--bg-elev); }
+
+  input, select {
+    font-family: var(--mono); font-size: 13px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border-bright); border-radius: 5px;
+    padding: 8px 10px; width: 100%;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+          color: var(--text-faint); display: block; margin-bottom: 5px; }
+
+  .mono { font-family: var(--mono); }
+  .pill {
+    font-family: var(--mono); font-size: 11px; padding: 2px 7px;
+    border-radius: 3px; border: 1px solid var(--border-bright);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .pill.running { color: var(--green); border-color: #1f4d35; background: #11241a; }
+  .pill.stopped { color: var(--text-faint); }
+  .pill.paused  { color: var(--blue); border-color: #234659; background: #112230; }
+
+  /* ---- login ---- */
+  #login {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  }
+  .login-card {
+    width: 340px; background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 32px;
+  }
+  .brand {
+    font-family: var(--mono); font-weight: 600; font-size: 18px;
+    letter-spacing: -.01em; margin-bottom: 4px;
+  }
+  .brand span { color: var(--accent); }
+  .brand-sub { color: var(--text-faint); font-size: 12px; margin-bottom: 24px; }
+
+  /* ---- shell ---- */
+  header {
+    display: flex; align-items: center; gap: 20px;
+    padding: 0 22px; height: 54px;
+    border-bottom: 1px solid var(--border); background: var(--bg-panel);
+  }
+  header .brand { font-size: 15px; margin: 0; }
+  header nav { display: flex; gap: 4px; margin-left: 12px; }
+  header nav button { border-color: transparent; background: transparent; color: var(--text-dim); }
+  header nav button.active { color: var(--text); background: var(--bg-elev); border-color: var(--border-bright); }
+  header .spacer { flex: 1; }
+  .whoami { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+  .whoami b { color: var(--accent); font-weight: 600; }
+
+  main { padding: 22px; max-width: 1280px; margin: 0 auto; }
+
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .toolbar .grow { flex: 1; min-width: 160px; }
+  .count { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+
+  /* ---- vm table ---- */
+  .panel {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 9px; overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--text-faint); font-weight: 600;
+    padding: 11px 14px; border-bottom: 1px solid var(--border);
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { cursor: pointer; transition: background .1s; }
+  tbody tr:hover { background: var(--bg-elev); }
+  .vmname { font-weight: 600; }
+  .vmid { font-family: var(--mono); color: var(--text-faint); font-size: 12px; }
+  .cl-tag {
+    font-family: var(--mono); font-size: 11px; color: var(--blue);
+    background: #112230; border: 1px solid #234659; padding: 1px 6px;
+    border-radius: 3px;
+  }
+
+  /* mini usage bar */
+  .bar { width: 86px; height: 6px; background: var(--bg); border-radius: 3px;
+         overflow: hidden; display: inline-block; vertical-align: middle; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .bar.warn > i { background: var(--red); }
+  .barval { font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+            margin-left: 7px; }
+
+  /* ---- modal / drawer ---- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; z-index: 50; justify-content: flex-end;
+  }
+  .drawer {
+    width: 520px; max-width: 92vw; background: var(--bg-panel);
+    border-left: 1px solid var(--border); height: 100%; overflow-y: auto;
+    padding: 24px;
+  }
+  .modal-center { align-items: center; justify-content: center; }
+  .modal {
+    width: 420px; background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px;
+  }
+  .drawer h2, .modal h2 { font-size: 16px; margin-bottom: 3px; }
+  .drawer-sub { color: var(--text-faint); font-family: var(--mono);
+                font-size: 12px; margin-bottom: 20px; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
+  .stat {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
+    padding: 11px 13px;
+  }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+             color: var(--text-faint); }
+  .stat .v { font-family: var(--mono); font-size: 18px; margin-top: 3px; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  .section-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-faint); margin: 20px 0 8px;
+    border-bottom: 1px solid var(--border); padding-bottom: 5px;
+  }
+  .kv { display: flex; justify-content: space-between; padding: 5px 0;
+        font-size: 13px; border-bottom: 1px solid var(--bg-elev); }
+  .kv span:first-child { color: var(--text-dim); }
+  .kv span:last-child { font-family: var(--mono); }
+
+  /* sparkline chart */
+  .chart-wrap { background: var(--bg); border: 1px solid var(--border);
+                border-radius: 7px; padding: 12px; margin-top: 6px; }
+  .chart-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+                 color: var(--text-faint); margin-bottom: 6px; }
+
+  .field { margin-bottom: 14px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grants-list { margin-top: 8px; }
+  .grant-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 0;
+    border-bottom: 1px solid var(--bg-elev); font-family: var(--mono);
+    font-size: 12px;
+  }
+  .grant-row .grow { flex: 1; }
+
+  .banner {
+    background: #3a1f1d; border: 1px solid #5e2c29; color: #f0b3ae;
+    padding: 9px 13px; border-radius: 6px; font-size: 13px; margin-bottom: 14px;
+  }
+  .toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--bg-elev); border: 1px solid var(--border-bright);
+    padding: 11px 18px; border-radius: 7px; z-index: 99; font-size: 13px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  }
+  .toast.err { border-color: var(--red); color: #f0b3ae; }
+  .toast.ok  { border-color: #1f4d35; color: var(--green); }
+
+  .empty { text-align: center; color: var(--text-faint); padding: 50px 0;
+           font-family: var(--mono); font-size: 13px; }
+  .err-text { color: var(--red); font-size: 12px; }
+  .msg { font-size: 12px; margin-top: 8px; min-height: 14px; }
+  .msg.err { color: var(--red); }
+  .msg.ok  { color: var(--green); }
+  .spin { display: inline-block; width: 13px; height: 13px;
+          border: 2px solid var(--border-bright); border-top-color: var(--accent);
+          border-radius: 50%; animation: sp .7s linear infinite;
+          vertical-align: middle; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+//============================================================================
+// Proxmox Manager — single-page UI. Vanilla JS, no build step.
+// All Proxmox access is server-side; this only talks to our own /api.
+//============================================================================
+
+const API = {
+  async call(method, path, body) {
+    const opt = { method, headers: {} };
+    if (body !== undefined) {
+      opt.headers['Content-Type'] = 'application/json';
+      opt.body = JSON.stringify(body);
+    }
+    const res = await fetch(path, opt);
+    if (res.status === 401) { state.user = null; render(); throw new Error('unauthorized'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    return data;
+  },
+  get:  (p)    => API.call('GET', p),
+  post: (p, b) => API.call('POST', p, b),
+  del:  (p)    => API.call('DELETE', p),
+};
+
+const state = {
+  user: null, role: null,
+  view: 'vms',
+  vms: [], vmErrors: {}, clusters: [],
+  filter: '',
+  selected: null,        // {cluster,node,vmid,...}
+  detail: null,          // status+config+history of selected
+  users: [], audit: [],
+  loading: false,
+};
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+function fmtBytes(n) {
+  if (!n && n !== 0) return '–';
+  const u = ['B','K','M','G','T']; let i = 0;
+  while (n >= 1024 && i < u.length-1) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + u[i];
+}
+function fmtUptime(s) {
+  if (!s) return '–';
+  const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600),
+        m = Math.floor((s%3600)/60);
+  if (d) return d+'d '+h+'h';
+  if (h) return h+'h '+m+'m';
+  return m+'m';
+}
+function fmtTs(t) { return new Date(t*1000).toLocaleString(); }
+
+let toastTimer = null;
+function toast(msg, kind) {
+  let el = document.querySelector('.toast');
+  if (el) el.remove();
+  el = document.createElement('div');
+  el.className = 'toast ' + (kind || '');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.remove(), 3800);
+}
+
+//----------------------------------------------------------------------------
+// data loading
+//----------------------------------------------------------------------------
+async function loadSession() {
+  try {
+    const me = await API.get('/api/me');
+    state.user = me.user; state.role = me.role;
+  } catch { state.user = null; }
+}
+async function loadVMs() {
+  state.loading = true; render();
+  try {
+    const [vmRes, clRes] = await Promise.all([
+      API.get('/api/vms'),
+      API.get('/api/clusters'),
+    ]);
+    state.vms = vmRes.vms; state.vmErrors = vmRes.errors || {};
+    state.clusters = clRes.clusters;
+  } catch (e) { if (e.message !== 'unauthorized') toast(e.message, 'err'); }
+  state.loading = false; render();
+}
+async function loadDetail(vm) {
+  state.selected = vm; state.detail = { loading: true }; render();
+  try {
+    const q = '?type=' + vm.type;
+    const [d, h] = await Promise.all([
+      API.get(`/api/vms/${vm.cluster}/${vm.node}/${vm.vmid}${q}`),
+      API.get(`/api/vms/${vm.cluster}/${vm.node}/${vm.vmid}/history?hours=24`),
+    ]);
+    state.detail = { ...d, history: h.samples, loading: false };
+  } catch (e) {
+    state.detail = { error: e.message, loading: false };
+  }
+  render();
+}
+async function loadUsers() {
+  try { state.users = (await API.get('/api/admin/users')).users; }
+  catch (e) { toast(e.message, 'err'); }
+  render();
+}
+async function loadAudit() {
+  try { state.audit = (await API.get('/api/audit')).entries; }
+  catch (e) { toast(e.message, 'err'); }
+  render();
+}
+
+//----------------------------------------------------------------------------
+// actions
+//----------------------------------------------------------------------------
+async function doAction(vm, action) {
+  const verb = { stop:'hard stop', shutdown:'shut down', reboot:'reboot',
+                 start:'start', suspend:'suspend', resume:'resume' }[action];
+  if (!confirm(`Confirm: ${verb} "${vm.name}" (VM ${vm.vmid} on ${vm.cluster})?`))
+    return;
+  try {
+    await API.post(`/api/vms/${vm.cluster}/${vm.node}/${vm.vmid}/action`,
+      { action, type: vm.type, confirm: true });
+    toast(`${verb} requested for ${vm.name}`, 'ok');
+    setTimeout(loadVMs, 1500);
+    if (state.selected && state.selected.vmid === vm.vmid)
+      setTimeout(() => loadDetail(vm), 1600);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function login(ev) {
+  ev.preventDefault();
+  const u = document.getElementById('li-user').value;
+  const p = document.getElementById('li-pass').value;
+  const btn = document.getElementById('li-btn');
+  btn.disabled = true; btn.textContent = 'Authenticating…';
+  try {
+    const r = await API.post('/api/login', { username: u, password: p });
+    state.user = r.user; state.role = r.role;
+    await loadVMs();
+  } catch (e) {
+    document.getElementById('li-err').textContent = e.message;
+    btn.disabled = false; btn.textContent = 'Sign in';
+  }
+}
+async function logout() {
+  await API.post('/api/logout').catch(()=>{});
+  state.user = null; state.vms = []; render();
+}
+
+//----------------------------------------------------------------------------
+// rendering
+//----------------------------------------------------------------------------
+function render() {
+  const app = document.getElementById('app');
+  if (!state.user) { app.innerHTML = loginView(); bindLogin(); return; }
+  app.innerHTML = shell(
+    state.view === 'vms'   ? vmsView()
+    : state.view === 'users' ? usersView()
+    : state.view === 'audit' ? auditView()
+    : ''
+  );
+  bindShell();
+  if (state.selected) { renderDrawer(); }
+}
+
+function loginView() {
+  return `<div id="login"><div class="login-card">
+    <div class="brand">prox<span>·</span>manager</div>
+    <div class="brand-sub">VM management & reporting</div>
+    <form id="login-form">
+      <div class="field"><label>Username</label>
+        <input id="li-user" autocomplete="username" autofocus /></div>
+      <div class="field"><label>Password</label>
+        <input id="li-pass" type="password" autocomplete="current-password" /></div>
+      <div id="li-err" class="err-text" style="margin-bottom:10px"></div>
+      <button id="li-btn" class="primary" style="width:100%">Sign in</button>
+    </form>
+  </div></div>`;
+}
+function bindLogin() {
+  document.getElementById('login-form').addEventListener('submit', login);
+}
+
+function shell(content) {
+  const isAdmin = state.role === 'admin';
+  const nav = (id, label) =>
+    `<button data-nav="${id}" class="${state.view===id?'active':''}">${label}</button>`;
+  return `
+  <header>
+    <div class="brand">prox<span>·</span>manager</div>
+    <nav>
+      ${nav('vms','Virtual Machines')}
+      ${isAdmin ? nav('users','Users & Access') : ''}
+      ${isAdmin ? nav('audit','Audit Log') : ''}
+    </nav>
+    <div class="spacer"></div>
+    <div class="whoami"><b>${esc(state.user)}</b> · ${esc(state.role)}</div>
+    <button class="ghost" data-act="logout">Sign out</button>
+  </header>
+  <main>${content}</main>`;
+}
+function bindShell() {
+  document.querySelectorAll('[data-nav]').forEach(b =>
+    b.onclick = () => {
+      state.view = b.dataset.nav; state.selected = null; render();
+      if (state.view === 'users') loadUsers();
+      if (state.view === 'audit') loadAudit();
+    });
+  const lo = document.querySelector('[data-act="logout"]');
+  if (lo) lo.onclick = logout;
+  const rf = document.querySelector('[data-act="refresh"]');
+  if (rf) rf.onclick = loadVMs;
+  const fi = document.getElementById('vm-filter');
+  if (fi) fi.oninput = e => { state.filter = e.target.value; renderVmRows(); };
+  document.querySelectorAll('[data-vm]').forEach(tr =>
+    tr.onclick = () => loadDetail(JSON.parse(tr.dataset.vm)));
+  bindUsersView();
+}
+
+//---- VMs view --------------------------------------------------------------
+function vmsView() {
+  const errKeys = Object.keys(state.vmErrors);
+  const errBanner = errKeys.length
+    ? `<div class="banner">Could not reach: ${errKeys.map(esc).join(', ')}.
+       Showing remaining clusters.</div>` : '';
+  return `
+    ${errBanner}
+    <div class="toolbar">
+      <div class="grow">
+        <input id="vm-filter" placeholder="Filter by name, vmid, node, cluster…"
+               value="${esc(state.filter)}" /></div>
+      <button data-act="refresh">${state.loading?'<span class="spin"></span> ':''}Refresh</button>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>Status</th><th>Name</th><th>Cluster</th><th>Node</th>
+          <th>CPU</th><th>Memory</th><th>Uptime</th>
+        </tr></thead>
+        <tbody id="vm-rows">${vmRowsHtml()}</tbody>
+      </table>
+    </div>`;
+}
+function filteredVMs() {
+  const f = state.filter.trim().toLowerCase();
+  if (!f) return state.vms;
+  return state.vms.filter(v =>
+    [v.name, v.vmid, v.node, v.cluster, v.type].join(' ').toLowerCase().includes(f));
+}
+function vmRowsHtml() {
+  const list = filteredVMs();
+  if (!list.length)
+    return `<tr><td colspan="7"><div class="empty">${
+      state.loading ? 'Loading…' : 'No VMs match.'}</div></td></tr>`;
+  return list.map(v => {
+    const cpuPct = v.cpu != null ? Math.round(v.cpu*100) : null;
+    const memPct = v.maxmem ? Math.round(v.mem/v.maxmem*100) : null;
+    const st = (v.status||'').toLowerCase();
+    const stClass = st==='running'?'running':st==='paused'?'paused':'stopped';
+    return `<tr data-vm='${esc(JSON.stringify(v))}'>
+      <td><span class="pill ${stClass}">${esc(v.status||'?')}</span></td>
+      <td><div class="vmname">${esc(v.name||'(unnamed)')}</div>
+          <div class="vmid">#${v.vmid} · ${esc(v.type)}</div></td>
+      <td><span class="cl-tag">${esc(v.cluster)}</span></td>
+      <td class="mono">${esc(v.node||'–')}</td>
+      <td>${barHtml(cpuPct)}</td>
+      <td>${barHtml(memPct)} <span class="barval">${fmtBytes(v.mem)}</span></td>
+      <td class="mono">${fmtUptime(v.uptime)}</td>
+    </tr>`;
+  }).join('');
+}
+function barHtml(pct) {
+  if (pct == null) return '<span class="barval">–</span>';
+  const warn = pct >= 85 ? ' warn' : '';
+  return `<span class="bar${warn}"><i style="width:${Math.min(pct,100)}%"></i></span>
+          <span class="barval">${pct}%</span>`;
+}
+function renderVmRows() {
+  const tb = document.getElementById('vm-rows');
+  if (!tb) return;
+  tb.innerHTML = vmRowsHtml();
+  tb.querySelectorAll('[data-vm]').forEach(tr =>
+    tr.onclick = () => loadDetail(JSON.parse(tr.dataset.vm)));
+}
+
+//---- VM detail drawer ------------------------------------------------------
+function renderDrawer() {
+  const vm = state.selected, d = state.detail;
+  const old = document.querySelector('.overlay');
+  if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.innerHTML = `<div class="drawer">${drawerBody(vm, d)}</div>`;
+  ov.onclick = e => { if (e.target === ov) closeDrawer(); };
+  document.body.appendChild(ov);
+  ov.querySelector('[data-act="close"]').onclick = closeDrawer;
+  ov.querySelectorAll('[data-pa]').forEach(b =>
+    b.onclick = () => doAction(vm, b.dataset.pa));
+}
+function closeDrawer() {
+  state.selected = null; state.detail = null;
+  const ov = document.querySelector('.overlay'); if (ov) ov.remove();
+}
+function drawerBody(vm, d) {
+  let body;
+  if (d.loading) body = '<div class="empty"><span class="spin"></span> Loading…</div>';
+  else if (d.error) body = `<div class="banner">${esc(d.error)}</div>`;
+  else body = drawerDetail(vm, d);
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:start">
+      <div><h2>${esc(vm.name||'(unnamed)')}</h2>
+        <div class="drawer-sub">#${vm.vmid} · ${esc(vm.cluster)} / ${esc(vm.node)} · ${esc(vm.type)}</div>
+      </div>
+      <button class="ghost" data-act="close">✕</button>
+    </div>
+    ${body}`;
+}
+function drawerDetail(vm, d) {
+  const s = d.status || {};
+  const cfg = d.config || {};
+  const canControl = state.role === 'admin' || canControlVm(vm);
+  const cpuPct = s.cpu != null ? (s.cpu*100).toFixed(1) : '–';
+  const memPct = s.maxmem ? Math.round(s.mem/s.maxmem*100) : null;
+
+  const actBtn = (a, label, cls) =>
+    `<button class="${cls||''}" data-pa="${a}" ${canControl?'':'disabled'}>${label}</button>`;
+  const running = (s.status||vm.status) === 'running';
+
+  return `
+    <div class="stat-grid">
+      <div class="stat"><div class="k">Status</div>
+        <div class="v">${esc(s.status||vm.status||'?')}</div></div>
+      <div class="stat"><div class="k">Uptime</div>
+        <div class="v">${fmtUptime(s.uptime)}</div></div>
+      <div class="stat"><div class="k">CPU</div>
+        <div class="v">${cpuPct}%</div></div>
+      <div class="stat"><div class="k">Memory</div>
+        <div class="v">${memPct!=null?memPct+'%':'–'}</div></div>
+    </div>
+
+    <div class="actions">
+      ${running
+        ? actBtn('shutdown','Shutdown') + actBtn('reboot','Reboot')
+          + actBtn('stop','Force Stop','danger')
+        : actBtn('start','Start','primary')}
+    </div>
+    ${canControl ? '' :
+      '<div class="drawer-sub">Read-only access — power controls disabled.</div>'}
+
+    <div class="section-label">24h history (CPU %)</div>
+    ${sparkline(d.history, h => (h.cpu||0)*100, '%')}
+    <div class="section-label">24h history (Memory %)</div>
+    ${sparkline(d.history,
+        h => h.mem_max ? (h.mem_used/h.mem_max)*100 : 0, '%')}
+
+    <div class="section-label">Configuration</div>
+    ${cfgRow('Cores', cfg.cores)}
+    ${cfgRow('Sockets', cfg.sockets)}
+    ${cfgRow('Memory', cfg.memory ? cfg.memory+' MB' : null)}
+    ${cfgRow('OS type', cfg.ostype)}
+    ${cfgRow('Boot disk', cfg.bootdisk)}
+    ${cfgRow('Description', cfg.description)}
+  `;
+}
+function cfgRow(k, v) {
+  if (v == null || v === '') return '';
+  return `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`;
+}
+function canControlVm() {
+  // The server is authoritative; this only hides buttons. For sub-users
+  // the server returns 403 on viewer-grants regardless of the UI.
+  return true;
+}
+function sparkline(samples, accessor, unit) {
+  if (!samples || samples.length < 2)
+    return '<div class="chart-wrap"><div class="empty" style="padding:18px">'
+         + 'Not enough history yet</div></div>';
+  const vals = samples.map(accessor);
+  const max = Math.max(...vals, 1), min = 0;
+  const W = 460, H = 70, n = vals.length;
+  const pts = vals.map((v,i) => {
+    const x = (i/(n-1))*W;
+    const y = H - ((v-min)/(max-min))*H;
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  const last = vals[vals.length-1];
+  return `<div class="chart-wrap">
+    <div class="chart-title">peak ${max.toFixed(0)}${unit} ·
+         current ${last.toFixed(1)}${unit}</div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
+         preserveAspectRatio="none">
+      <polyline points="${pts}" fill="none"
+        stroke="var(--accent)" stroke-width="1.6" />
+    </svg></div>`;
+}
+
+//---- Users & Access view ---------------------------------------------------
+function usersView() {
+  return `
+    <div class="toolbar">
+      <div class="grow"></div>
+      <button class="primary" data-act="newuser">+ Invite user</button>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>Username</th><th>Email</th><th>Role</th><th>Status</th>
+          <th>VM grants</th><th></th>
+        </tr></thead>
+        <tbody>${state.users.map(userRow).join('') ||
+          '<tr><td colspan="6"><div class="empty">No users</div></td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+function statusCell(u) {
+  if (u.status === 'active')
+    return '<span style="color:var(--green)">active</span>';
+  if (u.status === 'disabled')
+    return '<span class="err-text">disabled</span>';
+  // invited — show whether the pending invite is still usable
+  if (u.invite_state === 'expired')
+    return '<span class="err-text">invite expired</span>';
+  return '<span style="color:var(--blue)">invited</span>';
+}
+function userRow(u) {
+  const grants = (u.grants||[]).map(g =>
+    `${esc(g.cluster)}/${g.vmid}:${g.grant_role}`).join('  ') || '—';
+  return `<tr>
+    <td class="vmname">${esc(u.username)}</td>
+    <td class="mono" style="font-size:11px;color:var(--text-dim)">${
+      esc(u.email||'—')}</td>
+    <td><span class="pill">${esc(u.role)}</span></td>
+    <td>${statusCell(u)}</td>
+    <td class="mono" style="font-size:11px;color:var(--text-dim)">${esc(grants)}</td>
+    <td style="text-align:right">
+      ${u.role !== 'admin'
+        ? `<button class="ghost" data-edituser="${u.id}">Manage</button>` : ''}
+    </td>
+  </tr>`;
+}
+function bindUsersView() {
+  const nu = document.querySelector('[data-act="newuser"]');
+  if (nu) nu.onclick = openInviteUser;
+  document.querySelectorAll('[data-edituser]').forEach(b =>
+    b.onclick = () => openManageUser(Number(b.dataset.edituser)));
+}
+
+function openModal(html) {
+  const ov = document.createElement('div');
+  ov.className = 'overlay modal-center';
+  ov.innerHTML = `<div class="modal">${html}</div>`;
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+  return ov;
+}
+
+// Shown after an invite is created when SMTP didn't deliver the email:
+// give the admin the raw link to copy.
+function showInviteLink(ov, url, note) {
+  ov.querySelector('.modal').innerHTML = `
+    <h2>Invite created</h2>
+    <div class="drawer-sub">${esc(note || 'Send this link to the user.')}</div>
+    <div class="field">
+      <label>Invitation link</label>
+      <input id="inv-url" value="${esc(url)}" readonly
+        onclick="this.select()" />
+    </div>
+    <div class="actions" style="justify-content:flex-end">
+      <button data-x="copy">Copy link</button>
+      <button class="primary" data-x="done">Done</button>
+    </div>`;
+  ov.querySelector('[data-x="copy"]').onclick = () => {
+    const i = document.getElementById('inv-url');
+    i.select();
+    navigator.clipboard?.writeText(i.value);
+    toast('Link copied', 'ok');
+  };
+  ov.querySelector('[data-x="done"]').onclick = () => ov.remove();
+}
+
+function openInviteUser() {
+  const ov = openModal(`
+    <h2>Invite user</h2>
+    <div class="drawer-sub">
+      They'll get a link to set their own password</div>
+    <div class="field"><label>Username</label><input id="nu-user" /></div>
+    <div class="field"><label>Email address</label>
+      <input id="nu-email" type="email" /></div>
+    <div class="field"><label>Role</label>
+      <select id="nu-role">
+        <option value="viewer">viewer — read-only on assigned VMs</option>
+        <option value="operator">operator — control assigned VMs</option>
+        <option value="admin">admin — full access to everything</option>
+      </select></div>
+    <div class="actions" style="justify-content:flex-end">
+      <button data-x="cancel">Cancel</button>
+      <button class="primary" data-x="save">Send invite</button>
+    </div>
+    <div class="msg" id="nu-msg"></div>`);
+  ov.querySelector('[data-x="cancel"]').onclick = () => ov.remove();
+  ov.querySelector('[data-x="save"]').onclick = async () => {
+    const btn = ov.querySelector('[data-x="save"]');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const r = await API.post('/api/admin/users/invite', {
+        username: document.getElementById('nu-user').value,
+        email: document.getElementById('nu-email').value,
+        role: document.getElementById('nu-role').value,
+      });
+      loadUsers();
+      if (r.emailed) {
+        ov.remove(); toast('Invite emailed', 'ok');
+      } else {
+        // SMTP not configured / failed — show the link to copy.
+        showInviteLink(ov, r.invite_url, r.note);
+      }
+    } catch (e) {
+      toast(e.message, 'err');
+      btn.disabled = false; btn.textContent = 'Send invite';
+    }
+  };
+}
+function openManageUser(uid) {
+  const u = state.users.find(x => x.id === uid);
+  if (!u) return;
+  const clOpts = state.clusters.map(c =>
+    `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  const grantsHtml = (u.grants||[]).map(g => `
+    <div class="grant-row">
+      <span class="grow">${esc(g.cluster)} / VM ${g.vmid}</span>
+      <span class="pill">${esc(g.grant_role)}</span>
+      <button class="ghost" data-rmgrant="${esc(g.cluster)}|${g.vmid}">remove</button>
+    </div>`).join('') || '<div class="drawer-sub">No VM grants yet</div>';
+
+  const invited = u.status === 'invited';
+  // The Account section differs for pending invites vs active accounts.
+  const accountActions = invited
+    ? `<div class="drawer-sub">Invitation pending — ${
+         u.invite_state === 'expired'
+           ? 'the link has expired.' : 'not yet accepted.'}</div>
+       <div class="actions">
+         <button data-x="resend">Re-send invite</button>
+         <button class="danger" data-x="revoke">Revoke invite</button>
+       </div>`
+    : `<div class="actions">
+         <button data-x="resetpw">Reset password</button>
+         <button data-x="toggle">${
+           u.status==='disabled'?'Enable':'Disable'}</button>
+         <button class="danger" data-x="delete">Delete user</button>
+       </div>`;
+
+  const ov = openModal(`
+    <h2>Manage: ${esc(u.username)}</h2>
+    <div class="drawer-sub">${esc(u.role)} · ${esc(u.status)}${
+      u.email ? ' · ' + esc(u.email) : ''}</div>
+
+    <div class="section-label">VM grants</div>
+    <div class="grants-list">${grantsHtml}</div>
+
+    <div class="section-label">Add grant</div>
+    <div class="grid2">
+      <select id="g-cluster">${clOpts}</select>
+      <input id="g-vmid" placeholder="VM id (e.g. 101)" />
+    </div>
+    <div class="field" style="margin-top:10px">
+      <select id="g-role">
+        <option value="viewer">viewer</option>
+        <option value="operator">operator</option>
+      </select></div>
+    <button class="primary" data-x="addgrant" style="width:100%">Add grant</button>
+
+    <div class="section-label">Account</div>
+    ${accountActions}
+    <div class="actions" style="justify-content:flex-end">
+      <button data-x="close">Close</button>
+    </div>`);
+
+  const reload = async () => { await loadUsers(); ov.remove(); };
+  ov.querySelector('[data-x="close"]').onclick = () => ov.remove();
+
+  ov.querySelectorAll('[data-rmgrant]').forEach(b =>
+    b.onclick = async () => {
+      const [cl, vmid] = b.dataset.rmgrant.split('|');
+      try {
+        await API.del(`/api/admin/users/${uid}/grants?cluster=${
+          encodeURIComponent(cl)}&vmid=${vmid}`);
+        toast('Grant removed', 'ok'); reload();
+      } catch (e) { toast(e.message, 'err'); }
+    });
+
+  ov.querySelector('[data-x="addgrant"]').onclick = async () => {
+    const vmid = parseInt(document.getElementById('g-vmid').value, 10);
+    if (!vmid) { toast('Enter a numeric VM id', 'err'); return; }
+    try {
+      await API.post(`/api/admin/users/${uid}/grants`, {
+        cluster: document.getElementById('g-cluster').value,
+        vmid, grant_role: document.getElementById('g-role').value,
+      });
+      toast('Grant added', 'ok'); reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // --- invited-user actions ---
+  const resendBtn = ov.querySelector('[data-x="resend"]');
+  if (resendBtn) resendBtn.onclick = async () => {
+    try {
+      const r = await API.post(`/api/admin/users/${uid}/invite/resend`);
+      if (r.emailed) { toast('Invite re-sent by email', 'ok'); reload(); }
+      else { loadUsers(); showInviteLink(ov, r.invite_url, r.note); }
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const revokeBtn = ov.querySelector('[data-x="revoke"]');
+  if (revokeBtn) revokeBtn.onclick = async () => {
+    if (!confirm(`Revoke the invite for "${u.username}"? `
+      + `The account will be removed.`)) return;
+    try {
+      await API.del(`/api/admin/users/${uid}/invite`);
+      toast('Invite revoked', 'ok'); reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // --- active-user actions ---
+  const resetBtn = ov.querySelector('[data-x="resetpw"]');
+  if (resetBtn) resetBtn.onclick = async () => {
+    const pw = prompt('New password (min 8 characters):');
+    if (!pw) return;
+    try {
+      await API.post(`/api/admin/users/${uid}/password`, { password: pw });
+      toast('Password reset', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const toggleBtn = ov.querySelector('[data-x="toggle"]');
+  if (toggleBtn) toggleBtn.onclick = async () => {
+    try {
+      await API.post(`/api/admin/users/${uid}/status?disabled=${
+        u.status !== 'disabled'}`);
+      toast('Updated', 'ok'); reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const delBtn = ov.querySelector('[data-x="delete"]');
+  if (delBtn) delBtn.onclick = async () => {
+    if (!confirm(`Delete user "${u.username}"? This cannot be undone.`)) return;
+    try {
+      await API.del(`/api/admin/users/${uid}`);
+      toast('User deleted', 'ok'); reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
+//---- Audit view ------------------------------------------------------------
+function auditView() {
+  return `<div class="panel"><table>
+    <thead><tr><th>Time</th><th>Actor</th><th>Action</th>
+      <th>Target</th><th>Result</th></tr></thead>
+    <tbody>${state.audit.map(a => `<tr>
+      <td class="mono" style="font-size:11px">${fmtTs(a.ts)}</td>
+      <td>${esc(a.actor)}</td>
+      <td><span class="pill">${esc(a.action)}</span></td>
+      <td class="mono" style="font-size:11px">${
+        a.vmid ? esc(a.cluster)+'/'+a.vmid : '—'}</td>
+      <td class="mono" style="font-size:11px">${esc(a.result)}</td>
+    </tr>`).join('') ||
+      '<tr><td colspan="5"><div class="empty">No audit entries</div></td></tr>'}
+    </tbody></table></div>`;
+}
+
+//----------------------------------------------------------------------------
+// boot + periodic refresh
+//----------------------------------------------------------------------------
+(async function init() {
+  await loadSession();
+  if (state.user) await loadVMs(); else render();
+  // Live-ish refresh of the VM list every 20s while on that view.
+  setInterval(() => {
+    if (state.user && state.view === 'vms' && !state.loading) loadVMs();
+  }, 20000);
+})();
+</script>
+</body>
+</html>

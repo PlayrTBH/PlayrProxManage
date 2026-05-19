@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Accept invitation · Proxmox Manager</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg:#0e1116; --bg-panel:#161b22; --border:#2a323d;
+    --border-bright:#3a4654; --text:#d6dde6; --text-dim:#8b97a6;
+    --text-faint:#5b6675; --accent:#e8862e; --accent-dim:#7a4d1d;
+    --green:#41c178; --red:#e0524a;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:'IBM Plex Sans',sans-serif; font-size:14px;
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before {
+    content:""; position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(900px 500px at 85% -10%,
+      rgba(232,134,46,0.06),transparent);
+  }
+  .card {
+    position:relative; width:360px; background:var(--bg-panel);
+    border:1px solid var(--border); border-radius:10px; padding:32px;
+  }
+  .brand {
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:18px;
+    margin-bottom:4px;
+  }
+  .brand span { color:var(--accent); }
+  .sub { color:var(--text-faint); font-size:12px; margin-bottom:22px; }
+  label {
+    font-size:11px; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--text-faint); display:block; margin-bottom:5px;
+  }
+  input {
+    font-family:'IBM Plex Mono',monospace; font-size:13px;
+    background:var(--bg); color:var(--text);
+    border:1px solid var(--border-bright); border-radius:5px;
+    padding:9px 11px; width:100%;
+  }
+  input:focus { outline:none; border-color:var(--accent); }
+  .field { margin-bottom:14px; }
+  button {
+    font-family:'IBM Plex Sans',sans-serif; font-size:13px; cursor:pointer;
+    border:1px solid var(--accent); background:var(--accent-dim);
+    color:#fff; padding:9px 14px; border-radius:5px; width:100%;
+  }
+  button:hover:not(:disabled) { background:#93601f; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .msg { font-size:12px; margin-top:10px; min-height:16px; }
+  .msg.err { color:var(--red); }
+  .msg.ok  { color:var(--green); }
+  .hint { font-size:11px; color:var(--text-faint); margin-top:-8px;
+          margin-bottom:14px; }
+  .center { text-align:center; color:var(--text-dim); padding:14px 0; }
+  .spin {
+    display:inline-block; width:14px; height:14px;
+    border:2px solid var(--border-bright); border-top-color:var(--accent);
+    border-radius:50%; animation:sp .7s linear infinite; vertical-align:middle;
+  }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  a.btnlink {
+    display:inline-block; margin-top:14px; color:var(--accent);
+    text-decoration:none; font-size:13px;
+  }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="brand">prox<span>·</span>manager</div>
+  <div class="sub">Account invitation</div>
+  <div id="content"><div class="center"><span class="spin"></span>
+    Checking invitation…</div></div>
+</div>
+
+<script>
+// The invite token is the last path segment: /invite/<token>
+const TOKEN = decodeURIComponent(
+  location.pathname.split('/').filter(Boolean).pop() || '');
+
+const content = document.getElementById('content');
+
+function showInvalid(reason) {
+  const msg = {
+    expired:  'This invitation has expired. Ask an administrator to re-send it.',
+    accepted: 'This invitation has already been used. Try signing in instead.',
+    missing:  'This invitation link is not valid.',
+  }[reason] || 'This invitation link is not valid.';
+  content.innerHTML = `
+    <div class="msg err" style="margin-top:0">${msg}</div>
+    <a class="btnlink" href="/">Go to sign in</a>`;
+}
+
+function showForm(username) {
+  content.innerHTML = `
+    <div class="field">
+      <label>Username</label>
+      <input value="${username.replace(/[<>"]/g,'')}" disabled />
+    </div>
+    <div class="field">
+      <label>Choose a password</label>
+      <input id="pw" type="password" autocomplete="new-password" />
+    </div>
+    <div class="hint">At least 8 characters.</div>
+    <div class="field">
+      <label>Confirm password</label>
+      <input id="pw2" type="password" autocomplete="new-password" />
+    </div>
+    <button id="go">Activate account</button>
+    <div class="msg" id="m"></div>`;
+
+  const m = document.getElementById('m');
+  const btn = document.getElementById('go');
+
+  btn.onclick = async () => {
+    const pw  = document.getElementById('pw').value;
+    const pw2 = document.getElementById('pw2').value;
+    m.className = 'msg';
+    if (pw.length < 8) { m.className='msg err'; m.textContent='Password too short.'; return; }
+    if (pw !== pw2)    { m.className='msg err'; m.textContent='Passwords do not match.'; return; }
+
+    btn.disabled = true; btn.textContent = 'Activating…';
+    try {
+      const res = await fetch('/api/invite/accept', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ token: TOKEN, password: pw }),
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data.detail || ('HTTP '+res.status));
+      m.className = 'msg ok';
+      m.textContent = 'Account activated. Redirecting…';
+      // The accept endpoint already set a session cookie.
+      setTimeout(() => location.href = '/', 900);
+    } catch (e) {
+      m.className = 'msg err'; m.textContent = e.message;
+      btn.disabled = false; btn.textContent = 'Activate account';
+    }
+  };
+}
+
+(async function check() {
+  if (!TOKEN) { showInvalid('missing'); return; }
+  try {
+    const res = await fetch('/api/invite/' + encodeURIComponent(TOKEN));
+    const data = await res.json();
+    if (data.valid) showForm(data.username);
+    else showInvalid(data.reason);
+  } catch {
+    showInvalid('missing');
+  }
+})();
+</script>
+</body>
+</html>
