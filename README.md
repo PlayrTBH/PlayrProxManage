@@ -73,9 +73,18 @@ app to be read-only at the Proxmox level regardless of app roles.
 
 ## Install
 
+**One-liner** (run as root on a fresh Debian 12 / Ubuntu 22.04+ VM):
+
 ```sh
-git clone <this repo> proxmox-manager
-cd proxmox-manager
+curl -fsSL https://raw.githubusercontent.com/YOUR_USER/proxmanager/main/scripts/bootstrap.sh | sudo bash
+```
+
+The bootstrap script installs git if missing, clones the repo, runs the full
+installer, and cleans up. If you'd rather inspect before running:
+
+```sh
+git clone https://github.com/YOUR_USER/proxmanager
+cd proxmanager
 sudo ./scripts/install.sh
 ```
 
